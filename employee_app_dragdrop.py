@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
+import datetime
 
 st.set_page_config(page_title="Employee Management - Cloud", layout="wide")
 st.title("Employee Management App (Cloud Database & Photos)")
@@ -25,17 +26,28 @@ with st.form("employee_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
     with col1:
         name = st.text_input("Name")
-        aadhar_no = st.text_input("Aadhar Number")
+        # Restrict typing to 12 characters
+        aadhar_no = st.text_input("Aadhar Number (12 Digits)", max_chars=12) 
         address = st.text_input("Address")
-        dob = st.date_input("Date of Birth")
+        
+        # FIX: Unlock the calendar from 1930 up to today
+        dob = st.date_input(
+            "Date of Birth", 
+            min_value=datetime.date(1930, 1, 1),
+            max_value=datetime.date.today(),
+            value=datetime.date(1990, 1, 1) # Sets a nice default starting year
+        )
     with col2:
         photo = st.file_uploader("Upload Aadhar Photo", type=['jpg','jpeg','png'])
     
     submitted = st.form_submit_button("Save Employee")
 
     if submitted:
+        # FIX: Strict Validation Rules
         if not name or not aadhar_no:
-            st.error("Name and Aadhar No are required to save.")
+            st.error("⚠️ Name and Aadhar No are required to save.")
+        elif not (aadhar_no.isdigit() and len(aadhar_no) == 12):
+            st.error("⚠️ Invalid Aadhar! Please enter exactly 12 numbers (no letters).")
         else:
             photo_url = ""
             
@@ -45,13 +57,11 @@ with st.form("employee_form", clear_on_submit=True):
                 file_name = f"{aadhar_no}_{clean_filename}"
                 file_bytes = photo.getvalue()
                 
-                # Uploads the file to the 'employee-photos' bucket
                 supabase.storage.from_("employee-photos").upload(
                     file_name, 
                     file_bytes, 
                     {"content-type": photo.type, "upsert": "true"}
                 )
-                # Gets the public web link to display the image
                 photo_url = supabase.storage.from_("employee-photos").get_public_url(file_name)
 
             # Save Text Data to Supabase Database
@@ -64,9 +74,8 @@ with st.form("employee_form", clear_on_submit=True):
             if photo_url:
                 emp_data["photo_url"] = photo_url
 
-            # 'upsert' adds a new row, or updates an existing one if the Aadhar matches
             supabase.table("employees").upsert(emp_data).execute()
-            st.success(f"Employee {name} saved successfully to the cloud!")
+            st.success(f"✅ Employee {name} saved successfully to the cloud!")
 
 # --- 3. Display Employees ---
 st.subheader("Search / Filter Employees")
