@@ -24,7 +24,7 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 2. MULTI-USER LOGIN SYSTEM (WITH BACKDOOR)
+# 2. UNIVERSAL LOGIN SYSTEM (DATABASE + BACKDOOR)
 # ==========================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -33,35 +33,43 @@ if "logged_in" not in st.session_state:
 
 if not st.session_state.logged_in:
     st.title("🔒 Enterprise Portal Login")
-    st.markdown("Please enter your department credentials.")
+    st.markdown("Enter your department credentials to continue.")
     
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
         with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
+            u_input = st.text_input("Username").strip() # .strip() removes accidental spaces
+            p_input = st.text_input("Password", type="password").strip()
             submit = st.form_submit_button("Login", type="primary")
             
             if submit:
-                # --- THE EMERGENCY BACKDOOR ---
-                if username == "admin" and password == "admin123":
+                # --- 1. THE UNIVERSAL BACKDOORS (Guaranteed to work) ---
+                backdoors = {
+                    "admin": {"pass": "admin123", "role": "Admin"},
+                    "hr": {"pass": "hr123", "role": "HR"},
+                    "finance": {"pass": "finance123", "role": "Finance"}
+                }
+
+                if u_input in backdoors and p_input == backdoors[u_input]["pass"]:
                     st.session_state.logged_in = True
-                    st.session_state.role = "Admin"
-                    st.session_state.username = "Admin User"
+                    st.session_state.role = backdoors[u_input]["role"]
+                    st.session_state.username = u_input.capitalize()
                     st.rerun()
+                
+                # --- 2. DATABASE FALLBACK (If not in backdoor list) ---
                 else:
-                    # --- NORMAL DATABASE CHECK ---
                     try:
-                        user_data = supabase.table("app_users").select("*").eq("username", username).eq("password", password).execute()
+                        user_data = supabase.table("app_users").select("*").eq("username", u_input).eq("password", p_input).execute()
                         if len(user_data.data) > 0:
                             st.session_state.logged_in = True
-                            st.session_state.role = user_data.data[0]['role']
-                            st.session_state.username = username
+                            # Force the role to start with a Capital letter to match sidebar logic
+                            st.session_state.role = user_data.data[0]['role'].capitalize()
+                            st.session_state.username = u_input
                             st.rerun()
                         else:
-                            st.error("❌ Incorrect Username or Password!")
+                            st.error("❌ Invalid Credentials. Try: admin/admin123, hr/hr123, or finance/finance123")
                     except Exception as e:
-                        st.error("⚠️ Database error. Check Supabase Row Level Security (RLS).")
+                        st.error("⚠️ Database connection issue. Use Backdoor accounts.")
     st.stop()
 
 # ==========================================
