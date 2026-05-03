@@ -51,16 +51,25 @@ with st.form("employee_form", clear_on_submit=True):
     with col1:
         st.markdown("**Personal Details**")
         name = st.text_input("Full Name")
-        # --- HERE IS THE FATHER'S NAME ---
         father_name = st.text_input("Father's Name")
         aadhar_no = st.text_input("Aadhar Number (12 Digits)", max_chars=12) 
         mobile_no = st.text_input("Mobile Number (10 Digits)", max_chars=10)
-        dob = st.date_input(
-            "Date of Birth", 
-            min_value=datetime.date(1930, 1, 1),
-            max_value=datetime.date.today(),
-            value=datetime.date(1990, 1, 1) 
-        )
+        
+        # We put dates side-by-side inside this column to save space
+        date_col1, date_col2 = st.columns(2)
+        with date_col1:
+            dob = st.date_input(
+                "Date of Birth", 
+                min_value=datetime.date(1930, 1, 1),
+                max_value=datetime.date.today(),
+                value=datetime.date(1990, 1, 1) 
+            )
+        with date_col2:
+            # --- HERE IS THE JOINING DATE ---
+            joining_date = st.date_input(
+                "Joining Date", 
+                value=datetime.date.today() # Defaults to today
+            )
         
     with col2:
         st.markdown("**Bank & Address**")
@@ -103,10 +112,11 @@ with st.form("employee_form", clear_on_submit=True):
             # Save Data
             emp_data = {
                 "name": name,
-                "father_name": father_name,  # Added Father's Name here
+                "father_name": father_name,
                 "aadhar_no": aadhar_no,
                 "mobile_no": mobile_no,
                 "dob": str(dob),
+                "joining_date": str(joining_date), # Added Joining Date here
                 "address": address,
                 "bank_name": bank_name,
                 "account_no": account_no,
@@ -125,7 +135,6 @@ st.subheader("Employee Database")
 df = fetch_data()
 
 if not df.empty:
-    # Father's Name automatically gets exported to Excel!
     excel_df = df.drop(columns=['photo_url'], errors='ignore')
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -147,7 +156,6 @@ if not df.empty:
             df['name'].str.contains(search_query, case=False, na=False) |
             df['aadhar_no'].astype(str).str.contains(search_query, na=False) |
             df['mobile_no'].astype(str).str.contains(search_query, na=False) |
-            # Enable searching by Father's name too
             df['father_name'].astype(str).str.contains(search_query, case=False, na=False) 
         ]
     else:
@@ -156,7 +164,7 @@ if not df.empty:
     header_cols = st.columns([1.5, 1.5, 2, 2, 1, 1])
     header_cols[0].markdown("**Employee Info**")
     header_cols[1].markdown("**IDs & Contact**")
-    header_cols[2].markdown("**Address & DOB**")
+    header_cols[2].markdown("**Address & Dates**") # Updated column title
     header_cols[3].markdown("**Bank Details**")
     header_cols[4].markdown("**Photo**")
     header_cols[5].markdown("**Action**")
@@ -167,7 +175,6 @@ if not df.empty:
         
         with cols[0]: 
             st.markdown(f"**{row.get('name', '')}**")
-            # --- Display Father's Name under Employee Name ---
             if pd.notna(row.get('father_name')) and row.get('father_name') != "":
                 st.caption(f"C/O: {row.get('father_name', '')}")
             
@@ -177,6 +184,8 @@ if not df.empty:
             
         with cols[2]: 
             st.caption(f"DOB: {row.get('dob', '')}")
+            # --- Display Joining Date ---
+            st.caption(f"Joined: {row.get('joining_date', '')}") 
             st.caption(f"{row.get('address', '')}")
             
         with cols[3]: 
