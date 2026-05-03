@@ -14,17 +14,16 @@ def init_connection():
 
 supabase = init_connection()
 
-# --- SESSION STATE & AUTH ---
+# --- AUTH SYSTEM ---
 if "logged_in" not in st.session_state:
     st.session_state.update({"logged_in": False, "role": None, "username": None})
 
 if not st.session_state.logged_in:
-    st.title("🏢 KBP ENERGY PVT LTD")
+    st.title("🔒 KBP ENERGY PVT LTD")
     with st.form("login_gate"):
         u = st.text_input("Username").strip().lower()
         p = st.text_input("Password", type="password").strip()
         if st.form_submit_button("Login"):
-            # Universal Access (Bypasses table issues for now)
             access = {"admin": ("admin123", "Admin"), "hr": ("hr123", "HR"), 
                       "fin": ("fin123", "Finance"), "att": ("att123", "Attendance")}
             if u in access and p == access[u][0]:
@@ -33,25 +32,13 @@ if not st.session_state.logged_in:
             else: st.error("❌ Invalid Credentials")
     st.stop()
 
-# --- REUSABLE DATA FUNCTIONS ---
-def get_employees():
-    try:
-        res = supabase.table("employees").select("aadhar_no, name, base_salary").execute()
-        return pd.DataFrame(res.data)
-    except Exception: return pd.DataFrame(columns=["aadhar_no", "name", "base_salary"])
-
-# --- SIDEBAR NAVIGATION ---
+# --- SIDEBAR ---
 st.sidebar.title("KBP ENERGY")
-st.sidebar.write(f"Logged in as: **{st.session_state.username}**")
-
+st.sidebar.write(f"User: **{st.session_state.username}**")
 role = st.session_state.role
-nav_options = {
-    "Admin": ["📊 Dashboard", "👥 HR Portal", "📝 Attendance", "💰 Payroll"],
-    "HR": ["👥 HR Portal"],
-    "Attendance": ["📝 Attendance"],
-    "Finance": ["💰 Payroll"]
-}
-choice = st.sidebar.radio("Navigation", nav_options.get(role, []))
+nav = {"Admin": ["📊 Dashboard", "👥 HR Portal", "📝 Attendance", "💰 Payroll"],
+       "HR": ["👥 HR Portal"], "Attendance": ["📝 Attendance"], "Finance": ["💰 Payroll"]}
+choice = st.sidebar.radio("Navigation", nav.get(role, []))
 
 if st.sidebar.button("Logout"):
     st.session_state.update({"logged_in": False, "role": None})
@@ -62,103 +49,113 @@ if st.sidebar.button("Logout"):
 # ==========================================
 if choice == "📊 Dashboard":
     st.title("📊 Enterprise Overview")
-    df = get_employees()
-    if not df.empty:
+    try:
+        res = supabase.table("employees").select("base_salary").execute()
+        df = pd.DataFrame(res.data)
         c1, c2 = st.columns(2)
         c1.metric("Total Workforce", len(df))
-        c2.metric("Total Monthly Liability", f"₹ {df['base_salary'].sum():,.2f}")
-    else: st.info("Welcome! Start by adding employees in the HR Portal.")
+        c2.metric("Monthly Salary Liability", f"₹ {df['base_salary'].sum():,.2f}")
+    except: st.info("Add employees to see metrics.")
 
 # ==========================================
-# 👥 MODULE: HR (Employee Registry)
+# 👥 MODULE: HR PORTAL (Full Details)
 # ==========================================
 elif choice == "👥 HR Portal":
-    st.title("👥 Employee Registry")
-    with st.expander("➕ Register New Staff"):
-        with st.form("hr_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            name = c1.text_input("Name")
-            aadhar = c1.text_input("Aadhar No", max_chars=12)
-            mob = c2.text_input("Mobile")
-            sal = c2.number_input("Base Salary", min_value=0, value=15000)
-            if st.form_submit_button("Save Employee"):
-                supabase.table("employees").upsert({"aadhar_no": aadhar, "name": name, 
-                                                   "mobile_no": mob, "base_salary": sal}).execute()
-                st.success("Staff Registered!"); st.rerun()
+    st.title("👥 Employee Management")
     
-    st.dataframe(get_employees(), use_container_width=True, hide_index=True)
+    with st.expander("➕ Register New Staff (Full Details)"):
+        with st.form("full_hr_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            # Personal
+            name = col1.text_input("Full Name")
+            f_name = col1.text_input("Father's Name")
+            aadhar = col1.text_input("Aadhar Card No", max_chars=12)
+            mob = col1.text_input("Mobile No")
+            addr = col1.text_area("Full Address")
+            
+            # Professional/Bank
+            dob = col2.date_input("Date of Birth", value=datetime.date(1995,1,1))
+            doj = col2.date_input("Joining Date")
+            base_sal = col2.number_input("Monthly Base Salary", min_value=0, value=15000)
+            b_name = col2.text_input("Bank Name")
+            acc_no = col2.text_input("Account Number")
+            ifsc = col2.text_input("IFSC Code").upper()
+            
+            if st.form_submit_button("Save Employee Record"):
+                if not name or len(aadhar) != 12:
+                    st.error("Name and 12-digit Aadhar are mandatory.")
+                else:
+                    data = {
+                        "aadhar_no": aadhar, "name": name, "father_name": f_name,
+                        "mobile_no": mob, "address": addr, "dob": str(dob),
+                        "joining_date": str(doj), "base_salary": base_sal,
+                        "bank_name": b_name, "account_no": acc_no, "ifsc_code": ifsc
+                    }
+                    supabase.table("employees").upsert(data).execute()
+                    st.success(f"Record for {name} saved!"); st.rerun()
+
+    # --- Display Directory ---
+    st.subheader("Staff Directory")
+    res = supabase.table("employees").select("*").execute()
+    if res.data:
+        df_display = pd.DataFrame(res.data)
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+    else: st.write("No records found.")
 
 # ==========================================
-# 📝 MODULE: ADVANCED ATTENDANCE (Attendance Role)
+# 📝 MODULE: ATTENDANCE
 # ==========================================
 elif choice == "📝 Attendance":
-    st.title("📝 Staff Attendance")
-    date_pick = st.date_input("Attendance Date", datetime.date.today())
-    emps = get_employees()
+    st.title("📝 Daily Attendance")
+    dt = st.date_input("Date", datetime.date.today())
+    res_e = supabase.table("employees").select("aadhar_no, name").execute()
     
-    if emps.empty:
-        st.warning("Please add employees first.")
+    if not res_e.data:
+        st.warning("No employees found.")
     else:
-        st.info(f"Marking logs for: {date_pick}")
-        attendance_data = []
+        res_a = supabase.table("daily_attendance").select("*").eq("date", str(dt)).execute()
+        logs = {item['aadhar_no']: item['status'] for item in res_a.data}
         
-        # Load existing logs for the day
-        res = supabase.table("daily_attendance").select("*").eq("date", str(date_pick)).execute()
-        current_logs = {item['aadhar_no']: item['status'] for item in res.data}
-
-        for _, row in emps.iterrows():
-            col_name, col_status = st.columns([3, 2])
-            col_name.write(f"**{row['name']}**")
+        att_updates = []
+        for emp in res_e.data:
+            c1, c2 = st.columns([3, 2])
+            c1.write(f"**{emp['name']}**")
+            status = c2.selectbox("Status", ["Present", "Absent", "Half-Day", "Leave"], 
+                                  index=["Present", "Absent", "Half-Day", "Leave"].index(logs.get(emp['aadhar_no'], "Present")),
+                                  key=emp['aadhar_no'])
+            att_updates.append({"date": str(dt), "aadhar_no": emp['aadhar_no'], "status": status})
             
-            # Selectbox with existing data or default 'Present'
-            idx = ["Present", "Absent", "Half-Day", "Leave"].index(current_logs.get(row['aadhar_no'], "Present"))
-            status = col_status.selectbox("Status", ["Present", "Absent", "Half-Day", "Leave"], index=idx, key=row['aadhar_no'])
-            
-            attendance_data.append({"date": str(date_pick), "aadhar_no": row['aadhar_no'], "status": status})
-
-        if st.button("💾 Save Today's Logs", type="primary"):
-            supabase.table("daily_attendance").upsert(attendance_data).execute()
-            st.success("Logs updated in database!")
+        if st.button("Save Attendance", type="primary"):
+            supabase.table("daily_attendance").upsert(att_updates).execute()
+            st.success("Attendance updated!")
 
 # ==========================================
-# 💰 MODULE: PAYROLL (Finance Role)
+# 💰 MODULE: PAYROLL
 # ==========================================
 elif choice == "💰 Payroll":
     st.title("💰 Monthly Payroll")
-    target_month = st.date_input("Select Month (Select any date in that month)", datetime.date.today())
-    
-    if st.button("⚙️ Calculate Wages"):
-        emps = get_employees()
-        # Fetch attendance for the entire month
-        start_date = target_month.replace(day=1)
-        end_date = (start_date + datetime.timedelta(days=32)).replace(day=1) - datetime.timedelta(days=1)
+    sel_date = st.date_input("Select Month", datetime.date.today())
+    if st.button("Generate Reports"):
+        res_e = supabase.table("employees").select("name, aadhar_no, base_salary, bank_name, account_no").execute()
+        # Fetch month-wide logs
+        start = sel_date.replace(day=1)
+        res_a = supabase.table("daily_attendance").select("*").gte("date", str(start)).execute()
         
-        res = supabase.table("daily_attendance").select("*").gte("date", str(start_date)).lte("date", str(end_date)).execute()
-        logs = pd.DataFrame(res.data)
-        
-        if logs.empty:
-            st.error("No attendance records found for this month.")
+        if not res_a.data: st.error("No attendance found for this month.")
         else:
-            payroll_report = []
-            for _, emp in emps.iterrows():
-                p_logs = logs[logs['aadhar_no'] == emp['aadhar_no']]
-                # Calculation: Present=1, Half-Day=0.5, Absent/Leave=0
-                points = p_logs['status'].map({"Present": 1, "Half-Day": 0.5, "Absent": 0, "Leave": 0}).sum()
-                net_pay = (emp['base_salary'] / 30) * points # Assuming 30-day base
-                
-                payroll_report.append({
-                    "Name": emp['name'],
-                    "Aadhar": emp['aadhar_no'],
-                    "Days Marked": len(p_logs),
-                    "Worked Days": points,
-                    "Net Salary": round(net_pay, 2)
+            df_a = pd.DataFrame(res_a.data)
+            report = []
+            for emp in res_e.data:
+                emp_logs = df_a[df_a['aadhar_no'] == emp['aadhar_no']]
+                points = emp_logs['status'].map({"Present":1, "Half-Day":0.5, "Absent":0, "Leave":0}).sum()
+                net = round((emp['base_salary'] / 30) * points, 2)
+                report.append({
+                    "Name": emp['name'], "Aadhar": emp['aadhar_no'], 
+                    "Working Days": points, "Net Salary": net,
+                    "Bank": emp['bank_name'], "A/C": emp['account_no']
                 })
-            
-            pay_df = pd.DataFrame(payroll_report)
-            st.table(pay_df)
-            
-            # Excel Download
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                pay_df.to_excel(writer, index=False)
-            st.download_button("📥 Export Payroll (Excel)", output.getvalue(), f"KBP_Payroll_{target_month.strftime('%B_%Y')}.xlsx")
+            st.table(report)
+            # Excel Export
+            out = io.BytesIO()
+            pd.DataFrame(report).to_excel(out, index=False)
+            st.download_button("📥 Download Report", out.getvalue(), "Payroll.xlsx")
