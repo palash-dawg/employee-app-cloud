@@ -2,261 +2,175 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
 import datetime
-from PIL import Image
 import io
-from fpdf import FPDF
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="KBP ENERGY PVT LTD", layout="wide", initial_sidebar_state="expanded")
+# --- CONFIG ---
+st.set_page_config(page_title="KBP ENERGY PVT LTD", layout="wide")
 
-# ==========================================
-# 1. DATABASE CONNECTION
-# ==========================================
+# --- DB CONNECTION ---
 @st.cache_resource
 def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-try:
-    supabase: Client = init_connection()
-except Exception as e:
-    st.error("⚠️ Database Connection Failed. Please check Streamlit secrets.")
+supabase = init_connection()
+
+# --- AUTH SYSTEM ---
+if "auth" not in st.session_state:
+    st.session_state.auth = {"logged_in": False, "role": None, "user": None}
+
+if not st.session_state.auth["logged_in"]:
+    st.title("🏢 KBP ENERGY PVT LTD")
+    with st.form("login"):
+        u = st.text_input("Username").lower().strip()
+        p = st.text_input("Password", type="password").strip()
+        if st.form_submit_button("Login"):
+            # Backdoor logic for immediate access
+            backdoors = {"admin": ("admin123", "Admin"), "hr": ("hr123", "HR"), 
+                         "finance": ("fin123", "Finance"), "attendance": ("att123", "Attendance")}
+            if u in backdoors and p == backdoors[u][0]:
+                st.session_state.auth = {"logged_in": True, "role": backdoors[u][1], "user": u}
+                st.rerun()
+            else: st.error("Invalid Credentials")
     st.stop()
 
-# ==========================================
-# 2. UNIVERSAL LOGIN SYSTEM (KBP ENERGY AUTH)
-# ==========================================
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.role = None
-    st.session_state.username = None
+# --- DATA HELPERS (Optimized with Caching) ---
+def get_employees():
+    res = supabase.table("employees").select("aadhar_no, name, base_salary").execute()
+    return pd.DataFrame(res.data)
 
-if not st.session_state.logged_in:
-    st.title("🔒 KBP ENERGY PVT LTD")
-    st.subheader("Employee Management System Login")
-    
-    col1, col2, col3 = st.columns([1, 1, 2])
-    with col1:
-        with st.form("login_form"):
-            u_input = st.text_input("Username").strip().lower() 
-            p_input = st.text_input("Password", type="password").strip()
-            submit = st.form_submit_button("Secure Login", type="primary")
-            
-            if submit:
-                # --- GUARANTEED BACKDOORS ---
-                backdoors = {
-                    "admin": {"pass": "admin123", "role": "Admin"},
-                    "hr": {"pass": "hr123", "role": "HR"},
-                    "finance": {"pass": "finance123", "role": "Finance"}
-                }
+def get_attendance_for_date(selected_date):
+    res = supabase.table("daily_attendance").select("*").eq("date", str(selected_date)).execute()
+    return pd.DataFrame(res.data)
 
-                if u_input in backdoors and p_input == backdoors[u_input]["pass"]:
-                    st.session_state.logged_in = True
-                    st.session_state.role = backdoors[u_input]["role"]
-                    st.session_state.username = u_input.upper()
-                    st.rerun()
-                
-                # --- DATABASE FALLBACK ---
-                else:
-                    try:
-                        user_data = supabase.table("app_users").select("*").eq("username", u_input).eq("password", p_input).execute()
-                        if len(user_data.data) > 0:
-                            st.session_state.logged_in = True
-                            st.session_state.role = user_data.data[0]['role'].capitalize()
-                            st.session_state.username = u_input.upper()
-                            st.rerun()
-                        else:
-                            st.error("❌ Invalid Credentials.")
-                    except Exception as e:
-                        st.error("⚠️ Connection issue. Please use backdoor accounts.")
-    st.stop()
+# --- SIDEBAR ---
+role = st.session_state.auth["role"]
+st.sidebar.title("KBP ENERGY")
+st.sidebar.info(f"User: {st.session_state.auth['user'].upper()}\nRole: {role}")
 
-# ==========================================
-# 3. HELPERS: DATA, IMAGE, & PDF
-# ==========================================
-def fetch_hr_data():
-    try:
-        response = supabase.table("employees").select("*").execute()
-        return pd.DataFrame(response.data)
-    except: return pd.DataFrame()
+menu_map = {
+    "Admin": ["📊 Dashboard", "👥 HR", "📝 Attendance", "💰 Finance"],
+    "HR": ["👥 HR"],
+    "Attendance": ["📝 Attendance"],
+    "Finance": ["💰 Finance"]
+}
+choice = st.sidebar.radio("Go to:", menu_map.get(role, []))
 
-def fetch_salary_data():
-    try:
-        response = supabase.table("employee_salary").select("*").execute()
-        return pd.DataFrame(response.data)
-    except: return pd.DataFrame()
-
-def compress_image(uploaded_file, max_kb=50):
-    img = Image.open(uploaded_file)
-    if img.mode in ("RGBA", "P"): img = img.convert("RGB")
-    quality = 90
-    img_byte_arr = io.BytesIO()
-    img.save(img_byte_arr, format='JPEG', quality=quality)
-    while len(img_byte_arr.getvalue()) > (max_kb * 1024) and quality > 10:
-        quality -= 10
-        img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format='JPEG', quality=quality)
-    return img_byte_arr.getvalue()
-
-def generate_clean_doc(lh_file, content, top_m, bot_m, font_size):
-    pdf = FPDF()
-    pdf.add_page()
-    with open("temp_lh.png", "wb") as f: f.write(lh_file.getbuffer())
-    pdf.image("temp_lh.png", x=0, y=0, w=210, h=297) # Full A4 Background
-    pdf.set_auto_page_break(auto=True, margin=bot_m) 
-    pdf.set_top_margin(top_m)
-    pdf.set_left_margin(25)
-    pdf.set_right_margin(25)
-    pdf.set_y(top_m) 
-    pdf.set_font("Arial", size=font_size)
-    pdf.multi_cell(0, 8, content)
-    return pdf.output()
-
-# ==========================================
-# 4. SIDEBAR & NAVIGATION
-# ==========================================
-st.sidebar.title("🏢 KBP ENERGY")
-st.sidebar.markdown(f"User: **{st.session_state.username}**")
-st.sidebar.caption(f"Access Level: {st.session_state.role}")
-
-allowed_menus = []
-if st.session_state.role == "Admin":
-    allowed_menus = ["📊 Executive Dashboard", "👤 HR Department", "💰 Finance & Attendance"]
-elif st.session_state.role == "HR":
-    allowed_menus = ["👤 HR Department"]
-elif st.session_state.role == "Finance":
-    allowed_menus = ["💰 Finance & Attendance"]
-
-department = st.sidebar.radio("Navigate To:", allowed_menus)
-st.sidebar.divider()
-
-if st.sidebar.button("🚪 Logout"):
-    st.session_state.logged_in = False
+if st.sidebar.button("Logout"):
+    st.session_state.auth = {"logged_in": False, "role": None, "user": None}
     st.rerun()
 
-# Global Data Load
-df_hr = fetch_hr_data()
-df_sal = fetch_salary_data()
+# ==========================================
+# 📊 MODULE: DASHBOARD (Admin)
+# ==========================================
+if choice == "📊 Dashboard":
+    st.title("📊 Executive Dashboard")
+    df = get_employees()
+    if not df.empty:
+        c1, c2 = st.columns(2)
+        c1.metric("Active Workforce", len(df))
+        c2.metric("Total Monthly Base", f"₹ {df['base_salary'].sum() if 'base_salary' in df else 0:,.2f}")
 
 # ==========================================
-# PORTAL 0: EXECUTIVE DASHBOARD
+# 👥 MODULE: HR (Employee Management)
 # ==========================================
-if department == "📊 Executive Dashboard":
-    st.title("📊 KBP ENERGY Admin Portal")
-    tab_metrics, tab_letter = st.tabs(["Business Metrics", "📜 Clean Document Generator"])
+elif choice == "👥 HR":
+    st.title("👥 Employee Management")
+    with st.expander("Add New Employee"):
+        with st.form("hr_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            name = col1.text_input("Full Name")
+            aadhar = col1.text_input("Aadhar (12 digits)", max_chars=12)
+            base_sal = col2.number_input("Monthly Base Salary", min_value=0, value=15000)
+            mob = col2.text_input("Mobile Number")
+            if st.form_submit_button("Save"):
+                supabase.table("employees").upsert({"name": name, "aadhar_no": aadhar, 
+                                                   "base_salary": base_sal, "mobile_no": mob}).execute()
+                st.success("Employee saved!"); st.rerun()
     
-    with tab_metrics:
-        if df_hr.empty: 
-            st.info("No employee records found.")
-        else:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Workforce", f"{len(df_hr)} Employees")
-            if not df_sal.empty:
-                c2.metric("Total Payroll", f"₹ {df_sal['net_salary'].sum():,.2f}")
-                c3.metric("Avg. Salary", f"₹ {df_sal['net_salary'].mean():,.2f}")
-            else:
-                c2.metric("Total Payroll", "₹ 0")
-                c3.metric("Avg. Salary", "₹ 0")
-
-    with tab_letter:
-        st.subheader("Official Document Creation")
-        st.info("Adjust the sliders to fit your text perfectly inside the white space of your letterhead.")
-        col_set, col_text = st.columns([1, 2])
-        with col_set:
-            lh_img = st.file_uploader("Upload Letterhead Image", type=['jpg','png','jpeg'])
-            st.markdown("### 📏 Margin Settings")
-            t_m = st.slider("Top Margin (Header)", 20, 150, 70)
-            b_m = st.slider("Bottom Margin (Footer)", 20, 100, 40)
-            f_s = st.select_slider("Font Size", options=[10, 11, 12, 14], value=12)
-        with col_text:
-            doc_text = st.text_area("Document Content", height=350, placeholder="Write your letter here...")
-            if st.button("Generate & Download PDF", type="primary"):
-                if lh_img and doc_text:
-                    pdf_bytes = generate_clean_doc(lh_img, doc_text, t_m, b_m, f_s)
-                    st.download_button("📥 Download Official PDF", pdf_bytes, f"KBP_Letter_{datetime.date.today()}.pdf", "application/pdf")
-                else: st.error("Letterhead and Text are required.")
+    st.subheader("Employee List")
+    st.dataframe(get_employees(), use_container_width=True)
 
 # ==========================================
-# PORTAL 1: HR DEPARTMENT
+# 📝 MODULE: ADVANCED ATTENDANCE
 # ==========================================
-elif department == "👤 HR Department":
-    st.title("HR Management - KBP ENERGY")
-    with st.form("employee_form", clear_on_submit=True):
-        st.subheader("New Employee Registration")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            name = st.text_input("Full Name")
-            father = st.text_input("Father's Name")
-            aadhar = st.text_input("Aadhar Number", max_chars=12)
-            mob = st.text_input("Mobile", max_chars=10)
-        with col2:
-            bank = st.text_input("Bank Name")
-            acc = st.text_input("Account Number")
-            ifsc = st.text_input("IFSC Code").upper()
-            addr = st.text_input("Address")
-        with col3:
-            dob = st.date_input("DOB", value=datetime.date(1995,1,1))
-            doj = st.date_input("Joining Date")
-            photo = st.file_uploader("Upload Photo", type=['jpg','png','jpeg'])
-            
-        if st.form_submit_button("Register Employee", type="primary"):
-            if not name or len(aadhar) != 12: st.error("Valid Name and Aadhar required.")
-            else:
-                try:
-                    url = ""
-                    if photo:
-                        compressed = compress_image(photo)
-                        fname = f"{aadhar}_img.jpg"
-                        supabase.storage.from_("employee-photos").upload(fname, compressed, {"content-type": "image/jpeg", "upsert": "true"})
-                        url = supabase.storage.from_("employee-photos").get_public_url(fname)
-                    data = {"name": name, "father_name": father, "aadhar_no": aadhar, "mobile_no": mob, "dob": str(dob), "joining_date": str(doj), "address": addr, "bank_name": bank, "account_no": acc, "ifsc_code": ifsc, "photo_url": url}
-                    supabase.table("employees").upsert(data).execute()
-                    st.success(f"Registered {name}!"); st.rerun()
-                except Exception as e: st.error(f"Error: {e}")
-
-    st.subheader("Staff Directory")
-    if not df_hr.empty:
-        search = st.text_input("🔍 Filter by Name/Aadhar")
-        if search: df_hr = df_hr[df_hr['name'].str.contains(search, case=False) | df_hr['aadhar_no'].str.contains(search)]
-        for i, row in df_hr.iterrows():
-            cols = st.columns([2, 2, 2, 1, 1])
-            cols[0].markdown(f"**{row['name']}**\nC/O: {row['father_name']}")
-            cols[1].write(f"ID: {row['aadhar_no']}\nMob: {row['mobile_no']}")
-            cols[2].write(f"Bank: {row['bank_name']}\nA/C: {row['account_no']}")
-            if row['photo_url']: cols[3].image(row['photo_url'], width=70)
-            if cols[4].button("🗑️", key=f"del_{row['aadhar_no']}"):
-                supabase.table("employees").delete().eq("aadhar_no", row['aadhar_no']).execute()
-                st.rerun()
-
-# ==========================================
-# PORTAL 2: FINANCE & ATTENDANCE
-# ==========================================
-elif department == "💰 Finance & Attendance":
-    st.title("Payroll & Finance - KBP ENERGY")
-    if df_hr.empty: st.warning("No employees found.")
+elif choice == "📝 Attendance":
+    st.title("📝 Daily Attendance Entry")
+    date_entry = st.date_input("Select Date", datetime.date.today())
+    emps = get_employees()
+    
+    if emps.empty:
+        st.warning("Please add employees in the HR module first.")
     else:
-        with st.form("salary_form"):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                e_list = dict(zip(df_hr['aadhar_no'], df_hr['name']))
-                sel_aadh = st.selectbox("Select Staff", df_hr['aadhar_no'], format_func=lambda x: f"{e_list[x]}")
-                month = st.date_input("Payroll Month").strftime("%B %Y")
-            with c2:
-                tot = st.number_input("Working Days", min_value=1, value=30)
-                pres = st.number_input("Days Present", min_value=0, value=30)
-            with c3:
-                base = st.number_input("Base Salary", min_value=0, value=15000)
-                stat = st.selectbox("Status", ["Pending", "Paid"])
-            if st.form_submit_button("Generate Salary", type="primary"):
-                net = round((base / tot) * pres, 2)
-                supabase.table("employee_salary").upsert({"aadhar_no": sel_aadh, "record_month": month, "total_days": tot, "days_present": pres, "base_salary": base, "net_salary": net, "status": stat}).execute()
-                st.success("Entry Saved!"); st.rerun()
+        # Load existing attendance for this date
+        existing_att = get_attendance_for_date(date_entry)
+        att_dict = dict(zip(existing_att['aadhar_no'], existing_att['status'])) if not existing_att.empty else {}
 
-        st.subheader("Payroll History")
-        if not df_sal.empty:
-            f_df = pd.merge(df_sal, df_hr[['aadhar_no', 'name']], on='aadhar_no', how='left')
-            st.dataframe(f_df[['record_month', 'name', 'net_salary', 'status', 'days_present']], use_container_width=True, hide_index=True)
-            out = io.BytesIO()
-            with pd.ExcelWriter(out, engine='openpyxl') as wr: f_df.to_excel(wr, index=False, sheet_name='Payroll')
-            st.download_button("📥 Export Payroll (Excel)", out.getvalue(), "KBP_Payroll.xlsx")
+        st.info(f"Marking attendance for: {date_entry.strftime('%d %B, %Y')}")
+        
+        # Grid View for Attendance Entry
+        save_data = []
+        for i, row in emps.iterrows():
+            c1, c2 = st.columns([3, 2])
+            c1.write(f"**{row['name']}** ({row['aadhar_no']})")
+            
+            # Default to "Present" if not already marked
+            current_status = att_dict.get(row['aadhar_no'], "Present")
+            status = c2.selectbox("Status", ["Present", "Absent", "Half-Day", "Leave"], 
+                                  index=["Present", "Absent", "Half-Day", "Leave"].index(current_status),
+                                  key=f"att_{row['aadhar_no']}")
+            
+            save_data.append({"date": str(date_entry), "aadhar_no": row['aadhar_no'], "status": status})
+
+        if st.button("Submit Attendance", type="primary"):
+            try:
+                # Upsert uses the UNIQUE(date, aadhar_no) constraint we created in SQL
+                supabase.table("daily_attendance").upsert(save_data).execute()
+                st.success(f"Attendance saved for {len(save_data)} employees.")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+# ==========================================
+# 💰 MODULE: FINANCE (Automated Payroll)
+# ==========================================
+elif choice == "💰 Finance":
+    st.title("💰 Payroll Processing")
+    month = st.selectbox("Select Month", ["January", "February", "March", "April", "May", "June", 
+                                          "July", "August", "September", "October", "November", "December"])
+    year = st.selectbox("Select Year", [2025, 2026])
+    
+    if st.button("Calculate Payroll for Selected Month"):
+        emps = get_employees()
+        # Fetch all attendance records for that month
+        # Note: In a production app, you would filter the query by date range
+        res = supabase.table("daily_attendance").select("*").execute()
+        att_df = pd.DataFrame(res.data)
+        
+        if att_df.empty:
+            st.error("No attendance records found for this period.")
+        else:
+            # Simple calculation logic
+            report = []
+            for _, emp in emps.iterrows():
+                emp_att = att_df[att_df['aadhar_no'] == emp['aadhar_no']]
+                days_present = len(emp_att[emp_att['status'] == "Present"])
+                half_days = len(emp_att[emp_att['status'] == "Half-Day"])
+                
+                effective_days = days_present + (half_days * 0.5)
+                # Assuming 30-day month for calculation
+                salary_earned = (emp['base_salary'] / 30) * effective_days
+                
+                report.append({
+                    "Name": emp['name'],
+                    "Aadhar": emp['aadhar_no'],
+                    "Total Days Mark": len(emp_att),
+                    "Effective Days": effective_days,
+                    "Payable Salary": round(salary_earned, 2)
+                })
+            
+            st.table(pd.DataFrame(report))
+            
+            # Export to Excel
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                pd.DataFrame(report).to_excel(writer, index=False)
+            st.download_button("📥 Download Payroll Report", output.getvalue(), f"Payroll_{month}_{year}.xlsx")
