@@ -24,9 +24,8 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 2. MULTI-USER LOGIN SYSTEM
+# 2. MULTI-USER LOGIN SYSTEM (WITH BACKDOOR)
 # ==========================================
-# Initialize session states
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.role = None
@@ -44,19 +43,25 @@ if not st.session_state.logged_in:
             submit = st.form_submit_button("Login", type="primary")
             
             if submit:
-                try:
-                    # Check credentials against Supabase 'app_users' table
-                    user_data = supabase.table("app_users").select("*").eq("username", username).eq("password", password).execute()
-                    
-                    if len(user_data.data) > 0:
-                        st.session_state.logged_in = True
-                        st.session_state.role = user_data.data[0]['role']
-                        st.session_state.username = username
-                        st.rerun()
-                    else:
-                        st.error("❌ Incorrect Username or Password! (Check capitalization and spaces)")
-                except Exception as e:
-                    st.error("⚠️ Database error during login. Make sure RLS is disabled on the app_users table!")
+                # --- THE EMERGENCY BACKDOOR ---
+                if username == "admin" and password == "admin123":
+                    st.session_state.logged_in = True
+                    st.session_state.role = "Admin"
+                    st.session_state.username = "Admin User"
+                    st.rerun()
+                else:
+                    # --- NORMAL DATABASE CHECK ---
+                    try:
+                        user_data = supabase.table("app_users").select("*").eq("username", username).eq("password", password).execute()
+                        if len(user_data.data) > 0:
+                            st.session_state.logged_in = True
+                            st.session_state.role = user_data.data[0]['role']
+                            st.session_state.username = username
+                            st.rerun()
+                        else:
+                            st.error("❌ Incorrect Username or Password!")
+                    except Exception as e:
+                        st.error("⚠️ Database error. Check Supabase Row Level Security (RLS).")
     st.stop()
 
 # ==========================================
@@ -98,7 +103,7 @@ def compress_image(uploaded_file, max_kb=50):
 st.sidebar.title("🏢 Enterprise Portal")
 st.sidebar.caption(f"Logged in as: **{st.session_state.username}** ({st.session_state.role})")
 
-# Determine which menus they are allowed to see based on their role
+# Determine which menus they are allowed to see
 allowed_menus = []
 if st.session_state.role == "Admin":
     allowed_menus = ["📊 Executive Dashboard", "👤 HR Department", "💰 Finance & Attendance"]
@@ -121,7 +126,7 @@ df_hr = fetch_hr_data()
 df_sal = fetch_salary_data()
 
 # ==========================================
-# PORTAL 0: EXECUTIVE DASHBOARD (Admin Only)
+# PORTAL 0: EXECUTIVE DASHBOARD
 # ==========================================
 if department == "📊 Executive Dashboard":
     st.title("📊 Executive Overview")
@@ -144,7 +149,7 @@ if department == "📊 Executive Dashboard":
             m3.metric("Average Net Salary", "₹ 0")
 
 # ==========================================
-# PORTAL 1: HR DEPARTMENT (Admin & HR Only)
+# PORTAL 1: HR DEPARTMENT
 # ==========================================
 elif department == "👤 HR Department":
     st.title("HR Portal - Employee Management")
@@ -243,7 +248,7 @@ elif department == "👤 HR Department":
         st.info("No employees found.")
 
 # ==========================================
-# PORTAL 2: FINANCE & ATTENDANCE (Admin & Finance)
+# PORTAL 2: FINANCE & ATTENDANCE
 # ==========================================
 elif department == "💰 Finance & Attendance":
     st.title("Finance & Attendance Portal")
