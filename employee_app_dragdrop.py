@@ -51,6 +51,8 @@ with st.form("employee_form", clear_on_submit=True):
     with col1:
         st.markdown("**Personal Details**")
         name = st.text_input("Full Name")
+        # --- HERE IS THE FATHER'S NAME ---
+        father_name = st.text_input("Father's Name")
         aadhar_no = st.text_input("Aadhar Number (12 Digits)", max_chars=12) 
         mobile_no = st.text_input("Mobile Number (10 Digits)", max_chars=10)
         dob = st.date_input(
@@ -63,7 +65,6 @@ with st.form("employee_form", clear_on_submit=True):
     with col2:
         st.markdown("**Bank & Address**")
         bank_name = st.text_input("Bank Name (e.g., SBI, HDFC)")
-        # --- HERE IS THE ACCOUNT NUMBER ---
         account_no = st.text_input("Bank Account Number") 
         ifsc_code = st.text_input("IFSC Code (11 Chars)", max_chars=11)
         address = st.text_input("Full Address")
@@ -102,6 +103,7 @@ with st.form("employee_form", clear_on_submit=True):
             # Save Data
             emp_data = {
                 "name": name,
+                "father_name": father_name,  # Added Father's Name here
                 "aadhar_no": aadhar_no,
                 "mobile_no": mobile_no,
                 "dob": str(dob),
@@ -123,6 +125,7 @@ st.subheader("Employee Database")
 df = fetch_data()
 
 if not df.empty:
+    # Father's Name automatically gets exported to Excel!
     excel_df = df.drop(columns=['photo_url'], errors='ignore')
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -143,7 +146,9 @@ if not df.empty:
         filtered_df = df[
             df['name'].str.contains(search_query, case=False, na=False) |
             df['aadhar_no'].astype(str).str.contains(search_query, na=False) |
-            df['mobile_no'].astype(str).str.contains(search_query, na=False)
+            df['mobile_no'].astype(str).str.contains(search_query, na=False) |
+            # Enable searching by Father's name too
+            df['father_name'].astype(str).str.contains(search_query, case=False, na=False) 
         ]
     else:
         filtered_df = df
@@ -162,6 +167,9 @@ if not df.empty:
         
         with cols[0]: 
             st.markdown(f"**{row.get('name', '')}**")
+            # --- Display Father's Name under Employee Name ---
+            if pd.notna(row.get('father_name')) and row.get('father_name') != "":
+                st.caption(f"C/O: {row.get('father_name', '')}")
             
         with cols[1]: 
             st.caption(f"Aadhar: {row.get('aadhar_no', '')}")
